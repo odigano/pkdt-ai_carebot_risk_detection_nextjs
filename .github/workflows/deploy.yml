@@ -1,0 +1,48 @@
+name: Deploy Nextjs App
+
+on:
+  push:
+    branches:
+      - _deploy
+
+jobs:
+  deploy-test:
+    runs-on: ubuntu-latest
+    environment: test
+
+    steps:
+    - name: Checkout repository for deploy script and source
+      uses: actions/checkout@v5
+
+    - name: Configure SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -p ${{ secrets.SSH_HOST1_PORT }} ${{ secrets.HOST1 }} >> ~/.ssh/known_hosts
+        echo "SSH configuration complete on Runner."
+
+    - name: Deploy using remote script and rsync
+      run: |
+        USERNAME="${{ secrets.USERNAME }}"
+        HOST1="${{ secrets.HOST1 }}"
+        SSH_HOST1_PORT="${{ secrets.SSH_HOST1_PORT }}"
+        DEPLOY_PATH="${{ vars.DEPLOY_PATH }}"
+
+        DEPLOY_SCRIPT_PATH=".github/scripts/deploy.sh" 
+        REMOTE_SCRIPT_PATH="$DEPLOY_PATH/deploy_script.sh"
+
+        chmod +x "$DEPLOY_SCRIPT_PATH"
+
+        echo "--- DEPLOY JOB: Transferring deploy script and Nextjs app to remote server ---"
+        
+        # 1. 쉘 스크립트를 원격 서버로 전송
+        scp -P $SSH_HOST1_PORT "$DEPLOY_SCRIPT_PATH" $USERNAME@$HOST1:$REMOTE_SCRIPT_PATH
+        if [ $? -ne 0 ]; then echo "Error: Failed to transfer deploy script to host1"; exit 1; fi
+
+        # 2. 원격 서버에서 쉘 스크립트 실행 (인자 전달)
+        echo "--- DEPLOY JOB: Executing deploy script on remote server ---"
+        ssh -p $SSH_HOST1_PORT $USERNAME@$HOST1 "bash \"$REMOTE_SCRIPT_PATH\" \"$DEPLOY_PATH\""
+        if [ $? -ne 0 ]; then echo "Error: Remote deploy script failed from host1"; exit 1; fi
+        
+        echo "--- DEPLOY JOB END ---"
