@@ -1,81 +1,62 @@
-import axios from "axios";
-import { DollListView, PagedResponse } from "@/types/index";
+// src/lib/api.ts
 
-// ✅ axios 인스턴스 생성
+import axios from 'axios';
+
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL,
-  withCredentials: true,
+  baseURL: process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080/api',
   headers: {
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
 
-// ✅ 요청 인터셉터: Access Token 자동 추가
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("accessToken");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token.replace(/"/g, '')}`;
+      }
     }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// ✅ 응답 인터셉터: 401 토큰 만료 시 Refresh
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-
       try {
         const refreshResponse = await axios.post(
           `${process.env.NEXT_PUBLIC_API_BASE_URL}/refresh`,
           {},
           { withCredentials: true }
         );
-
-        const newAccessToken = refreshResponse.headers.authorization;
+        const newAccessToken = refreshResponse.headers.authorization?.split(' ')[1];
         if (newAccessToken) {
-          localStorage.setItem("accessToken", newAccessToken);
+          localStorage.setItem('accessToken', newAccessToken);
+          api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
           return api(originalRequest);
         }
       } catch (refreshError) {
-        console.error("Token refresh failed:", refreshError);
-        localStorage.clear();
-        if (typeof window !== "undefined") window.location.href = "/";
+        // ✅ [핵심 수정] 갱신 실패 시, localStorage를 정리하고 커스텀 이벤트를 발생시킨다.
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('username');
+        delete api.defaults.headers.common['Authorization'];
+        if (typeof window !== 'undefined') {
+          // AuthProvider가 이 이벤트를 듣고 로그아웃 처리를 하도록 한다.
+          window.dispatchEvent(new CustomEvent('sessionExpired'));
+        }
+        // 여기서 에러를 다시 던져서, 원래 요청을 했던 곳(catch 블록)으로 실패를 알린다.
         return Promise.reject(refreshError);
       }
     }
-
     return Promise.reject(error);
   }
 );
-
-// ✅ 인형 API
-export const dollApi = {
-  async getList(page = 0, size = 15): Promise<PagedResponse<DollListView>> {
-    const res = await api.get("/dolls", { params: { page, size } });
-    return res.data;
-  },
-
-  async getDetail(dollId: string): Promise<DollListView> {
-    const res = await api.get(`/dolls/${dollId}`);
-    return res.data;
-  },
-
-  async create(dollId: string): Promise<DollListView> {
-    const res = await api.post("/dolls", { id: dollId });
-    return res.data;
-  },
-
-  async delete(dollId: string): Promise<void> {
-    await api.delete(`/dolls/${dollId}`);
-  },
-};
 
 export default api;

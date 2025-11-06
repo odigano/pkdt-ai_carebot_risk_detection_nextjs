@@ -1,138 +1,125 @@
-// src/app/main/page.tsx
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import api from "@/lib/api";
-import { DashboardData } from "@/types";
-import Link from "next/link";
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import api from '@/lib/api';
+import StatusSummary from '@/components/common/StatusSummary';
+import RiskRankMap from '@/components/common/RiskRankMap';
+import RiskRankList from '@/components/common/RiskRankList';
+import type { DashboardData, DashboardSenior, RiskLevel } from '@/types';
 
-// ✨ 변경점: 대시보드 로딩을 위한 스켈레톤 컴포넌트
-function DashboardSkeleton() {
-  return (
-    <div className="space-y-6">
-      <div className="border rounded-lg p-4 bg-white shadow-sm">
-        <div className="h-6 w-32 mx-auto bg-gray-200 rounded animate-pulse-slow mb-4"></div>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="space-y-2">
-              <div className="h-4 w-16 mx-auto bg-gray-200 rounded animate-pulse-slow"></div>
-              <div className="h-6 w-12 mx-auto bg-gray-200 rounded animate-pulse-slow"></div>
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="border rounded-lg p-4 bg-white shadow-sm">
-        <div className="h-6 w-48 bg-gray-200 rounded animate-pulse-slow mb-4"></div>
-        <div className="space-y-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="flex items-center p-3 rounded-lg bg-gray-100 animate-pulse-slow">
-              <div className="w-10 h-10 rounded-full bg-gray-200"></div>
-              <div className="ml-3 flex-1 space-y-2">
-                <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
+const DEFAULT_MAP_CENTER = { lat: 36.3504, lng: 127.3845 };
+const DEFAULT_MAP_LEVEL = 7;
+const ZOOM_ON_SELECT = 4;
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedLevel, setSelectedLevel] = useState<RiskLevel>('EMERGENCY'); 
+  const [selectedSenior, setSelectedSenior] = useState<DashboardSenior | null>(null);
+  const [mapCenter, setMapCenter] = useState(DEFAULT_MAP_CENTER);
+  const [mapLevel, setMapLevel] = useState(DEFAULT_MAP_LEVEL);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      // 로딩 상태를 확실히 하기 위해 초기화
-      setLoading(true);
-      try {
-        const response = await api.get<DashboardData>("/dashboard");
-        setData(response.data);
-      } catch (err) {
-        setError("대시보드 데이터를 불러오는 데 실패했습니다.");
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  const fetchDashboardData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const resp = await api.get<DashboardData>('/dashboard');
+      setData(resp.data);
+    } catch (err) {
+      console.error(err);
+      setError('대시보드 데이터를 불러오는 데 실패했습니다.');
+    } finally { setLoading(false); }
   }, []);
 
-  // ✨ 변경점: 로딩 중일 때 스켈레톤 UI를 보여줌
-  if (loading) return <DashboardSkeleton />;
-  if (error) return <p className="text-center mt-10 text-red-600">{error}</p>;
-  if (!data) return <p className="text-center mt-10 text-gray-600">표시할 데이터가 없습니다.</p>;
-  
-  const riskColor: { [key: string]: string } = {
-    EMERGENCY: "text-red-600 border-red-200 bg-red-50",
-    CRITICAL: "text-orange-600 border-orange-200 bg-orange-50",
-    DANGER: "text-yellow-400 border-yellow-200 bg-yellow-50",
-    POSITIVE: "text-green-600 border-green-200 bg-green-50",
+  useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
+
+  // --- SSE 연결 ---
+  useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    const url = token
+      ? `/api/notifications/subscribe?access_token=${encodeURIComponent(token)}`
+      : '/api/notifications/subscribe';
+    const es = new EventSource(url, { withCredentials: true });
+    eventSourceRef.current = es;
+
+    es.onopen = () => console.log('SSE 연결 열림');
+    es.onerror = (err) => console.error('SSE 오류', err);
+    es.addEventListener('notification', (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { type: string };
+        if (payload.type === 'ANALYSIS_COMPLETE' || payload.type === 'SENIOR_STATE_CHANGED') {
+          fetchDashboardData();
+        }
+      } catch (err) { console.error('SSE 파싱 오류', err); }
+    });
+
+    return () => { if (es) es.close(); eventSourceRef.current = null; };
+  }, [fetchDashboardData]);
+
+  // --- 상태별 필터 + 최신순 정렬 ---
+  const filteredSeniors = useMemo(() => {
+    if (!data?.seniors_by_state) return [];
+    const key = selectedLevel.toLowerCase() as keyof typeof data.seniors_by_state;
+    const arr = data.seniors_by_state[key] ?? [];
+    return arr.filter(s => s.latitude && s.longitude)
+              .sort((a, b) => new Date(b.last_state_changed_at).getTime() - new Date(a.last_state_changed_at).getTime());
+  }, [data, selectedLevel]);
+
+  useEffect(() => {
+    if (selectedSenior?.latitude && selectedSenior?.longitude) {
+      setMapCenter({ lat: selectedSenior.latitude, lng: selectedSenior.longitude });
+      setMapLevel(ZOOM_ON_SELECT);
+    } else if (filteredSeniors.length > 0) {
+      setMapCenter({ lat: filteredSeniors[0].latitude!, lng: filteredSeniors[0].longitude! });
+      setMapLevel(DEFAULT_MAP_LEVEL);
+    } else {
+      setMapCenter(DEFAULT_MAP_CENTER);
+      setMapLevel(DEFAULT_MAP_LEVEL);
+    }
+  }, [selectedSenior, filteredSeniors]);
+
+  const handleLevelSelect = (level: RiskLevel) => { setSelectedLevel(level); setSelectedSenior(null); setMapLevel(DEFAULT_MAP_LEVEL); };
+  const handleSeniorSelect = (senior: DashboardSenior) => { setSelectedSenior(senior); };
+  const handleInfoWindowClick = (senior?: DashboardSenior) => {
+    if (senior?.latest_overall_result_id) {
+      router.push(`/analysis/${senior.latest_overall_result_id}/page?senior_id=${senior.senior_id}`);
+    }
   };
 
-  return (
-    <div className="space-y-6">
-      {/* 시니어 현황 */}
-      <div className="border rounded-lg p-4 bg-white shadow-sm">
-        <h2 className="text-lg font-bold mb-4 text-center text-black">시니어 현황</h2>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
-          <div>
-            <div className="text-gray-700">총 이용자</div>
-            <div className="text-2xl font-bold text-black">{data.state_count.total}명</div>
-          </div>
-          <div className={riskColor.EMERGENCY.split(' ')[0]}>
-            <div>긴급</div>
-            <div className="text-xl font-bold">{data.state_count.emergency}명</div>
-          </div>
-          <div className={riskColor.CRITICAL.split(' ')[0]}>
-            <div>위험</div>
-            <div className="text-xl font-bold">{data.state_count.critical}명</div>
-          </div>
-          <div className={riskColor.DANGER.split(' ')[0]}>
-            <div>주의</div>
-            <div className="text-xl font-bold">{data.state_count.danger}명</div>
-          </div>
-          <div className={riskColor.POSITIVE.split(' ')[0]}>
-            <div>안전</div>
-            <div className="text-xl font-bold">{data.state_count.positive}명</div>
-          </div>
-        </div>
-      </div>
+  if (error) return <p className="text-center mt-10 text-red-600">{error}</p>;
+  if (loading && !data) return <div>Loading...</div>;
+  if (!data) return <p className="text-center mt-10 text-gray-600">표시할 데이터가 없습니다.</p>;
 
-      {/* 최근 긴급 분석 결과 */}
-      <div className="border rounded-lg p-4 bg-white shadow-sm">
-        <h2 className="text-lg font-bold mb-4 text-black">긴급 분석 결과 (최근 10건)</h2>
-        <div className="space-y-3">
-          {data.recent_urgent_results.length > 0 ? (
-            data.recent_urgent_results.map((item) => (
-              <Link href={`/main/analysis/${item.overall_result_id}`} key={item.overall_result_id}>
-                <div
-                  className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer hover:shadow-md transition-shadow ${riskColor[item.label] || ''}`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <span className="text-xl">👤</span>
-                    <div>
-                      <span className="font-semibold">{item.name}</span> ({item.sex === 'MALE' ? '남' : '여'}/{item.age}세)
-                      <div className="text-sm text-gray-500 flex items-center space-x-2">
-                        <span>📍 {item.gu} {item.dong}</span>
-                        <span>⏱ {new Date(item.timestamp).toLocaleString('ko-KR')}</span>
-                      </div>
-                      <p className="text-sm text-gray-700 mt-1 truncate">{item.summary}</p>
-                    </div>
-                  </div>
-                  <span className={`text-sm font-bold px-2 py-1 rounded-full ${riskColor[item.label]}`}>
-                    {item.label}
-                  </span>
-                </div>
-              </Link>
-            ))
-          ) : (
-            <p className="text-center text-gray-500 py-4">최근 긴급 분석 결과가 없습니다.</p>
-          )}
+  return (
+    <div className="container mx-auto space-y-6 p-4">
+      <StatusSummary
+        counts={data.state_count}
+        selectedLevel={selectedLevel}
+        onSelectLevel={handleLevelSelect}
+      />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-[600px]">
+        <div className="md:col-span-2">
+          <RiskRankMap
+            seniors={filteredSeniors}
+            selectedSenior={selectedSenior}
+            mapCenter={mapCenter}
+            level={mapLevel}
+            onMarkerClick={handleSeniorSelect}
+            onInfoWindowClick={handleInfoWindowClick}
+            currentLevel={selectedLevel}
+          />
+        </div>
+        <div className="md:col-span-1">
+          <RiskRankList
+            seniors={filteredSeniors}
+            selectedSeniorId={selectedSenior?.senior_id ?? null}
+            onSeniorSelect={handleSeniorSelect}
+            riskLevelLabel={selectedLevel}
+          />
         </div>
       </div>
     </div>

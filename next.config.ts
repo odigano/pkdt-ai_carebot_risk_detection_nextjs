@@ -16,8 +16,8 @@ const nextConfig: NextConfig = {
       //   port: '',
       //   pathname: '/api/seniors/photos/**',
       // },
-    ],
-  },
+      ],
+  }, output: 'standalone'
 };
 
 export default nextConfig;

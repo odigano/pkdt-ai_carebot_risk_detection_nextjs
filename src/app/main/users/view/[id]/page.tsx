@@ -129,7 +129,7 @@ export default function UserDetailPage() {
         });
 
         setAge(calculateAge(data.birth_date ?? ""));
-        setPhotoPreview(data.photo_url ? "http://localhost:8080" + data.photo_url : null);
+        setPhotoPreview(data.photo_url ? process.env.NEXT_PUBLIC_API_BASE_URL + "/" + data.photo_url : null);
         setOriginalPhoto(data.photo_url ?? null);
 
         // ✅ 최근 분석 최대 5개만 저장
@@ -374,7 +374,7 @@ export default function UserDetailPage() {
                       }`}
                   />
                 </td>
-                <th className={thClass}>인형 아이디{requiredLabel}</th>
+                <th className={thClass}>인형 ID{requiredLabel}</th>
                 <td className={tdClass}><input name="doll_id" value={form.doll_id} onChange={handleChange} className={`${inputClass} w-full`} readOnly={!isEditing} required /></td>
               </tr>
               <tr>
@@ -521,10 +521,10 @@ export default function UserDetailPage() {
         <div className="flex justify-center gap-4 pt-4">
           {isEditing ? (
             <>
-              <button type="submit" disabled={isSubmitting} className="px-8 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400">
+              <button type="submit" disabled={isSubmitting} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400">
                 저장
               </button>
-              <button type="button" onClick={handleToggleEdit} className="px-8 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
+              <button type="button" onClick={handleToggleEdit} className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
                 취소
               </button>
             </>
@@ -533,15 +533,15 @@ export default function UserDetailPage() {
               <button
                 type="button"
                 onClick={() => router.push(`/main/users/edit/${id}`)}
-                className="px-8 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
               >
                 수정
               </button>
 
-              <button type="button" onClick={handleDelete} className="px-8 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+              <button type="button" onClick={handleDelete} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 cursor-pointer">
                 삭제
               </button>
-              <button type="button" onClick={() => router.push("/main/users/view")} className="px-8 py-2 bg-gray-200 text-black rounded-lg hover:bg-gray-300">
+              <button type="button" onClick={() => router.push("/main/users/view")} className="px-4 py-2 bg-gray-200 text-black rounded-lg hover:bg-gray-300 cursor-pointer">
                 목록으로
               </button>
             </>

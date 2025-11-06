@@ -1,7 +1,4 @@
 @import "tailwindcss";
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 :root {
   --background: #ffffff;
@@ -10,7 +7,7 @@
 
 @theme inline {
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-foreground: var(--foregroundz);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -34,6 +31,24 @@
     }
   }
 }
+
+@layer utilities {
+  @keyframes fadeInDown {
+    from {
+      opacity: 0;
+      transform: translate3d(0, -20px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  .animate-fade-in-down {
+    animation: fadeInDown 0.5s ease-out forwards;
+  }
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
